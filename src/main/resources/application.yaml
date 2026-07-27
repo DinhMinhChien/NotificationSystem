@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: notification
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/notification_db
+    username: root
+    password: Dinhminhchien@123
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+    consumer:
+      group-id: notification-group
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: dinhminhchien0706@gmail.com
+    password: yaqfdjhprlyiundm
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: 7077
+  error:
+    include-exception: true
+    include-message: always
+    include-binding-errors: always
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.springframework.kafka: INFO
