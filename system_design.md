@@ -9,7 +9,7 @@
 Hệ thống cung cấp giải pháp gửi thông báo đến người dùng qua nhiều kênh (Email, SMS, Push) một cách linh hoạt, đáng tin cậy và có thể mở rộng.
 
 ### Tính năng chính
--  Hỗ trợ 3 kênh gửi: Email, SMS, Push
+-  Hỗ trợ 3 kênh gửi: Email, SMS, Push (Hoàn thành workflow của EMAIL tương đối hoàn chỉnh , luồng SMS và FireBase đang tìm hướng phát triển và đang dừng lại ở mock dữ liệu) 
 -  Tạo và quản lý campaign thông báo
 -  3 loại lên lịch: Lập tức, Một lần, Định kỳ (Cron)
 -  Quản lý tùy chọn người dùng (opt-in/opt-out)
