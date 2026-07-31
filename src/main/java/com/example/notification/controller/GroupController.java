@@ -6,8 +6,10 @@ import com.example.notification.dto.request.InsertMemberRequest;
 import com.example.notification.dto.response.GroupResponse;
 import com.example.notification.entity.User;
 import com.example.notification.service.GroupService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,12 +17,13 @@ import java.util.List;
 @RestController
 @RequestMapping("/v1/groups")
 @RequiredArgsConstructor
+@Validated
 public class GroupController {
 
     private final GroupService groupService ;
 
     @PostMapping
-    public ResponseEntity<BaseResponse<GroupResponse>> create(@RequestBody GroupCreateRequest request) {
+    public ResponseEntity<BaseResponse<GroupResponse>> create(@RequestBody @Valid GroupCreateRequest request) {
         GroupResponse response = groupService.create(request) ;
         return ResponseEntity.ok(BaseResponse.ofSuccess(response,"Create group success")) ;
     }
@@ -32,7 +35,7 @@ public class GroupController {
     }
 
     @PostMapping("/{id}/members")
-    public ResponseEntity<BaseResponse<String>> insertMember(@RequestBody InsertMemberRequest request, @PathVariable String id) {
+    public ResponseEntity<BaseResponse<String>> insertMember(@RequestBody @Valid InsertMemberRequest request, @PathVariable String id) {
         groupService.insertMember(id,request) ;
         return ResponseEntity.ok(BaseResponse.ofSuccess("Insert member in group success")) ;
     }

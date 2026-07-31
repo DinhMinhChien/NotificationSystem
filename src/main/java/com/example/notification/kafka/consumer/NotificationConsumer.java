@@ -20,6 +20,6 @@ public class NotificationConsumer {
             exclude = {NullPointerException.class, RuntimeException.class}
     )
     public void handleNotification(NotificationEvent event) {
-        notificationService.processCampaign(event.getCampaignId()) ;
+        notificationService.processCampaign(event) ;
     }
 }

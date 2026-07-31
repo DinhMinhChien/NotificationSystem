@@ -5,32 +5,26 @@ import com.example.notification.common.enums.NotificationStatus;
 import com.example.notification.entity.Notification;
 import com.example.notification.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
-public class EmailSender implements NotificationSender {
-    private final JavaMailSender javaMailSender ;
+@Slf4j
+public class PushSender implements NotificationSender{
     private final NotificationRepository notificationRepository ;
-
     @Override
     public ChannelType getSupportedChannel() {
-        return ChannelType.EMAIL ;
+        return ChannelType.PUSH;
     }
 
     @Override
     public void send(Notification notification) {
         try {
-            SimpleMailMessage message = new SimpleMailMessage() ;
-            message.setTo(notification.getRecipientAddress());
-            message.setSubject(notification.getTitle());
-            message.setText(notification.getContent());
 
-            javaMailSender.send(message);
+            log.info("Sending FireBase to {}: {}", notification.getRecipientAddress(), notification.getContent());
 
             notification.setStatus(NotificationStatus.SENT);
             notification.setSentAt(LocalDateTime.now());
@@ -38,8 +32,8 @@ public class EmailSender implements NotificationSender {
             notification.setStatus(NotificationStatus.FAILED);
             notification.setRetryCount(notification.getRetryCount() + 1);
 
-            String errorMsg = e.getMessage() != null ? e.getMessage() : "Email Send Failed";
-            notification.setErrorMessage(errorMsg.substring(0, Math.min(errorMsg.length(), 255)));
+            String error = e.getMessage() != null ? e.getMessage() : "Unknown PUSH Error";
+            notification.setErrorMessage(error.substring(0, Math.min(error.length(), 255)));
         }
         notificationRepository.save(notification);
     }

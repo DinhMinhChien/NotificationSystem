@@ -22,7 +22,7 @@ public class TemplateSpecification {
             }
         };
     }
-    public static Specification<Template> likeChannel(ChannelType channel) {
+    public static Specification<Template> equalChannel(ChannelType channel) {
         return new Specification<Template>() {
             @Nullable
             @Override
@@ -30,11 +30,11 @@ public class TemplateSpecification {
                 if (channel == null) {
                     return criteriaBuilder.conjunction() ;
                 }
-                return criteriaBuilder.like(root.get("channel"),"%" + channel + "%") ;
+                return criteriaBuilder.equal(root.get("channel"),channel) ;
             }
         };
     }
-    public static Specification<Template> likeLanguage(String language) {
+    public static Specification<Template> equalLanguage(String language) {
         return new Specification<Template>() {
             @Nullable
             @Override
@@ -42,17 +42,11 @@ public class TemplateSpecification {
                 if (language == null) {
                     return criteriaBuilder.conjunction() ;
                 }
-                return criteriaBuilder.like(root.get("language"),"%" + language + "%") ;
+                return criteriaBuilder.equal(root.get("language"),language) ;
             }
         };
     }
     public static Specification<Template> notDeleted() {
-        return new Specification<Template>() {
-            @Nullable
-            @Override
-            public Predicate toPredicate(Root<Template> root, @Nullable CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder) {
-                return criteriaBuilder.like(root.get("deleted"),"%" + false + "%") ;
-            }
-        };
+        return (root, query, cb) -> cb.isFalse(root.get("deleted"));
     }
 }

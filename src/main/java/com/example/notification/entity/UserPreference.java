@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.UuidGenerator;
 
 @Entity
 @Table(name = "user_preferences")
@@ -16,6 +17,8 @@ import lombok.Setter;
 @AllArgsConstructor
 public class UserPreference extends BaseEntity{
     @Id
+    @UuidGenerator
+    @Column(name = "id")
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -30,5 +33,6 @@ public class UserPreference extends BaseEntity{
     @Enumerated(EnumType.STRING)
     private ChannelType channel;
 
+    @Column(name = "is_enabled")
     private Boolean isEnabled;
 }

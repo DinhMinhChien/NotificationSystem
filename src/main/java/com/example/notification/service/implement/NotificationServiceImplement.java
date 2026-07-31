@@ -5,107 +5,131 @@ import com.example.notification.common.enums.ChannelType;
 import com.example.notification.common.enums.NotificationStatus;
 import com.example.notification.common.enums.NotificationType;
 import com.example.notification.common.exception.BusinessException;
+import com.example.notification.dto.response.NotificationDashboard;
 import com.example.notification.dto.response.NotificationResponse;
-import com.example.notification.entity.Campaign;
-import com.example.notification.entity.GroupMember;
-import com.example.notification.entity.Notification;
-import com.example.notification.entity.Template;
-import com.example.notification.entity.User;
+import com.example.notification.entity.*;
+import com.example.notification.kafka.dto.NotificationEvent;
 import com.example.notification.mapper.NotificationMapper;
-import com.example.notification.repository.CampaignRepository;
-import com.example.notification.repository.GroupMemberRepository;
-import com.example.notification.repository.NotificationRepository;
-import com.example.notification.repository.UserPreferenceRepository;
-import com.example.notification.repository.UserRepository;
+import com.example.notification.repository.*;
 import com.example.notification.service.NotificationService;
 import com.example.notification.service.sender.NotificationSenderFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 public class NotificationServiceImplement implements NotificationService {
 
-    private final CampaignRepository campaignRepository ;
-    private final GroupMemberRepository groupMemberRepository ;
-    private final UserRepository userRepository ;
+    private final CampaignRepository campaignRepository;
+    private final GroupMemberRepository groupMemberRepository;
+    private final UserRepository userRepository;
     private final NotificationRepository notificationRepository;
     private final UserPreferenceRepository userPreferenceRepository;
-    private final NotificationSenderFactory notificationSenderFactory ;
+    private final NotificationSenderFactory notificationSenderFactory;
+    private final NotificationMapper notificationMapper;
+    private final TransactionTemplate transactionTemplate;
+
     private static final Pattern TEMPLATE_VARIABLE_PATTERN = Pattern.compile("\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*}}");
 
-    private final NotificationMapper notificationMapper ;
     @Override
-    public void processCampaign(String campaignId) {
-        Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new BusinessException("Campaign not found"));
+    public void processCampaign(NotificationEvent event) {
+        String campaignId = event.getCampaignId();
+        Map<String, String> payload = event.getPayload();
 
-        Template template = campaign.getTemplate();
-        if (template == null || Boolean.FALSE.equals(template.getIsActive())) {
-            throw new BusinessException("Campaign template is not active");
-        }
+        // 1. Khởi tạo & Lưu các bản ghi Notification vào DB (Chạy trong Transaction ngắn)
+        List<Notification> notificationsToSend = transactionTemplate.execute(status -> {
+            Campaign campaign = campaignRepository.findById(campaignId)
+                    .orElseThrow(() -> new BusinessException("Campaign not found"));
 
-        List<User> recipients = switch (campaign.getTargetType()) {
-            case USER -> List.of(campaign.getTargetUser());
-            case GROUP -> groupMemberRepository
-                    .findAllByGroup(campaign.getTargetGroup())
-                    .stream()
-                    .map(GroupMember::getUser)
-                    .toList();
-            case ALL -> userRepository.findAll();
-            case CONDITION -> throw new UnsupportedOperationException(
-                    "Condition target type is not implemented yet"
-            );
-        };
-
-        NotificationType notificationType = template.getNotificationType();
-        if (notificationType == null) {
-            throw new BusinessException("Template notification type is required");
-        }
-        ChannelType channel = template.getChannel();
-
-        List<Notification> notifications = recipients.stream()
-                .filter(Objects::nonNull)
-                .filter(user -> !Boolean.FALSE.equals(user.getIsActive()))
-                .filter(user -> hasRecipientAddress(user, channel))
-                .filter(user -> isPreferenceEnabled(user, notificationType, channel))
-                .map(user -> buildNotification(campaign, template, user, notificationType, channel))
-                .filter(notification -> !notificationRepository.existsByIdempotencyKey(notification.getIdempotencyKey()))
-                .toList();
-
-        notificationRepository.saveAll(notifications);
-
-        for (Notification notification : notifications) {
-            notificationSenderFactory
-                    .getSender(notification.getChannel())
-                    .send(notification);
-        }
-        switch (campaign.getScheduleType()) {
-
-            case IMMEDIATE, ONCE -> {
-                campaign.setStatus(CampaignStatus.COMPLETED);
+            Template template = campaign.getTemplate();
+            if (template == null || Boolean.FALSE.equals(template.getIsActive())) {
+                throw new BusinessException("Campaign template is not active");
             }
 
+            List<User> recipients = switch (campaign.getTargetType()) {
+                case USER -> List.of(campaign.getTargetUser());
+                case GROUP -> groupMemberRepository.findAllByGroup(campaign.getTargetGroup())
+                        .stream().map(GroupMember::getUser).toList();
+                case ALL -> userRepository.findAll();
+                case CONDITION -> throw new UnsupportedOperationException("Condition target type is not implemented yet");
+            };
+
+            NotificationType notificationType = template.getNotificationType();
+            ChannelType channel = template.getChannel();
+
+            // Lọc danh sách User hợp lệ
+            List<User> validUsers = recipients.stream()
+                    .filter(Objects::nonNull)
+                    .filter(user -> !Boolean.FALSE.equals(user.getIsActive())) // lọc user khong còn hoạt động
+                    .filter(user -> hasRecipientAddress(user, channel)) // lọc user không có địa chỉ gửi (email,sdt ,...)
+                    .filter(user -> isPreferenceEnabled(user, notificationType, channel)) // lọc user không bật cấu hình nhận thông bao
+                    .toList();
+
+            // Build danh sách Notification tạm thời
+            List<Notification> candidateNotifications = validUsers.stream()
+                    .map(user -> buildNotification(campaign, template, user, notificationType, channel, payload))
+                    .toList();
+
+            if (candidateNotifications.isEmpty()) {
+                updateCampaignStatus(campaign);
+                return List.of();
+            }
+
+            //  Lấy tất cả idempotencyKey đã tồn tại
+            Set<String> candidateKeys = candidateNotifications.stream()
+                    .map(Notification::getIdempotencyKey)
+                    .collect(Collectors.toSet());
+
+            Set<String> existingKeys = notificationRepository.findAllIdempotencyKeyIn(candidateKeys);
+
+            // Filter bỏ các bản ghi đã tồn tại
+            List<Notification> finalNotifications = candidateNotifications.stream()
+                    .filter(n -> !existingKeys.contains(n.getIdempotencyKey()))
+                    .toList();
+
+            notificationRepository.saveAll(finalNotifications);
+            updateCampaignStatus(campaign);
+
+            return finalNotifications;
+        });
+
+        if (notificationsToSend == null || notificationsToSend.isEmpty()) {
+            return;
+        }
+
+        // 2. Gửi Email/SMS NGOÀI Transaction (Tránh treo DB Connection Pool)
+        for (Notification notification : notificationsToSend) {
+            try {
+                notificationSenderFactory
+                        .getSender(notification.getChannel())
+                        .send(notification);
+            } catch (Exception e) {
+                log.error("Failed to send notification ID {}: {}", notification.getId(), e.getMessage());
+            }
+        }
+    }
+
+    private void updateCampaignStatus(Campaign campaign) {
+        switch (campaign.getScheduleType()) {
+            case IMMEDIATE, ONCE -> campaign.setStatus(CampaignStatus.COMPLETED);
             case RECURRING -> {
-                CronExpression cron =
-                        CronExpression.parse(campaign.getCronExpression());
-
+                CronExpression cron = CronExpression.parse(campaign.getCronExpression());
                 campaign.setScheduledAt(cron.next(campaign.getScheduledAt()));
-
                 campaign.setStatus(CampaignStatus.SCHEDULED);
             }
         }
-
         campaignRepository.save(campaign);
     }
 
@@ -120,7 +144,8 @@ public class NotificationServiceImplement implements NotificationService {
             Template template,
             User user,
             NotificationType notificationType,
-            ChannelType channel
+            ChannelType channel,
+            Map<String, String> payload
     ) {
         Notification notification = new Notification();
         notification.setUser(user);
@@ -129,7 +154,8 @@ public class NotificationServiceImplement implements NotificationService {
         notification.setChannel(channel);
         notification.setIdempotencyKey(buildIdempotencyKey(campaign, user, channel));
         notification.setRecipientAddress(resolveRecipientAddress(user, channel));
-        Map<String, String> variables = buildVariables(campaign, template, user);
+
+        Map<String, String> variables = buildVariables(campaign, template, user, payload);
         notification.setTitle(render(template.getSubject(), variables));
         notification.setContent(render(template.getContent(), variables));
         notification.setStatus(NotificationStatus.QUEUED);
@@ -157,22 +183,21 @@ public class NotificationServiceImplement implements NotificationService {
         return recipientAddress != null && !recipientAddress.isBlank();
     }
 
-    private Map<String, String> buildVariables(Campaign campaign, Template template, User user) {
+    private Map<String, String> buildVariables(Campaign campaign, Template template, User user, Map<String, String> payload) {
         Map<String, String> variables = new HashMap<>();
         variables.put("user_id", nullToEmpty(user.getId()));
-        variables.put("userId", nullToEmpty(user.getId()));
         variables.put("user_name", nullToEmpty(user.getFullName()));
-        variables.put("fullName", nullToEmpty(user.getFullName()));
         variables.put("email", nullToEmpty(user.getEmail()));
         variables.put("phone", nullToEmpty(user.getPhone()));
         variables.put("campaign_id", nullToEmpty(campaign.getId()));
-        variables.put("campaignId", nullToEmpty(campaign.getId()));
         variables.put("campaign_name", nullToEmpty(campaign.getName()));
-        variables.put("campaignName", nullToEmpty(campaign.getName()));
         variables.put("template_code", nullToEmpty(template.getCode()));
-        variables.put("templateCode", nullToEmpty(template.getCode()));
-        variables.put("notification_type", template.getNotificationType().name());
-        variables.put("channel", template.getChannel().name());
+
+        // Nạp thêm tất cả dữ liệu động từ payload (Order, Payment...)
+        if (payload != null && !payload.isEmpty()) {
+            variables.putAll(payload);
+        }
+
         return variables;
     }
 
@@ -196,17 +221,36 @@ public class NotificationServiceImplement implements NotificationService {
     }
 
     @Override
-    public List<NotificationResponse> getByUser(String userId) {
-        if (userId == null) {
-            throw new BusinessException("userId null") ;
-        }
-        Optional<User> existUser = userRepository.findById(userId) ;
-        if (existUser.isEmpty()) {
-            throw new BusinessException("Not found user") ;
+    public Page<NotificationResponse> getByUser(String userId, int pageNumber, int pageSize) {
+        PageRequest pageable = PageRequest.of(pageNumber, pageSize);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("Not found user"));
+
+        return notificationRepository.findAllByUser(user, pageable)
+                .map(notificationMapper::toResponse);
+    }
+
+    @Override
+    public NotificationDashboard summary() {
+        int totalNotifications = notificationRepository.countAllByDeleted(false);
+        if (totalNotifications == 0) {
+            return new NotificationDashboard();
         }
 
-        List<Notification> notifications = notificationRepository.findAllByUser(existUser.get()) ;
-        return notificationMapper.toResponse(notifications) ;
+        int totalSent = notificationRepository.countAllByStatus(NotificationStatus.SENT);
+        int totalFailed = notificationRepository.countAllByStatus(NotificationStatus.FAILED);
+        int totalRead = notificationRepository.countAllByIsRead(true);
 
+        double successRate = (double) totalSent / totalNotifications;
+        double errorRate = (double) totalFailed / totalNotifications;
+        double readRate = (double) totalRead / totalNotifications;
+
+        NotificationDashboard notificationDashboard = new NotificationDashboard();
+        notificationDashboard.setTotalNotifications(totalNotifications);
+        notificationDashboard.setSuccessRate(Math.round(successRate * 100.0));
+        notificationDashboard.setErrorRate(Math.round(errorRate * 100.0));
+        notificationDashboard.setReadRate(Math.round(readRate * 100.0));
+
+        return notificationDashboard;
     }
 }

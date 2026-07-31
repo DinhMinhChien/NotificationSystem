@@ -4,16 +4,21 @@ import com.example.notification.common.BaseResponse;
 import com.example.notification.dto.request.UpdatePreferenceRequest;
 import com.example.notification.dto.response.UserPreferenceResponse;
 import com.example.notification.service.UserPreferenceService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/v1/preferences")
+@RequiredArgsConstructor
+@Validated
 public class UserPreferenceController {
 
-    private UserPreferenceService userPreferenceService ;
+    private final UserPreferenceService userPreferenceService ;
 
     @GetMapping("/{userId}")
     public ResponseEntity<BaseResponse<List<UserPreferenceResponse>>> getPreferences(@PathVariable String userId) {
@@ -22,7 +27,7 @@ public class UserPreferenceController {
 
     }
     @PutMapping("/{userId}")
-    public ResponseEntity<BaseResponse<String>> update(@PathVariable String userId, @RequestBody UpdatePreferenceRequest request) {
+    public ResponseEntity<BaseResponse<String>> update(@PathVariable String userId, @RequestBody @Valid UpdatePreferenceRequest request) {
         userPreferenceService.update(userId,request);
         return ResponseEntity.ok(BaseResponse.ofSuccess("Update preferences success")) ;
     }

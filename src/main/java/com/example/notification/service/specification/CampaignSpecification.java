@@ -22,12 +22,6 @@ public class CampaignSpecification {
         };
     }
     public static Specification<Campaign> notDeleted() {
-        return new Specification<Campaign>() {
-            @Nullable
-            @Override
-            public Predicate toPredicate(Root<Campaign> root, @Nullable CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder) {
-                return criteriaBuilder.like(root.get("deleted"),"%" + false + "%") ;
-            }
-        };
+        return (root, query, cb) -> cb.isFalse(root.get("deleted"));
     }
 }

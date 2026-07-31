@@ -6,8 +6,10 @@ import com.example.notification.dto.request.TemplateCreateRequest;
 import com.example.notification.dto.request.TemplateUpdateRequest;
 import com.example.notification.dto.response.TemplateResponse;
 import com.example.notification.service.TemplateService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,11 +17,12 @@ import java.util.List;
 @RestController
 @RequestMapping("/v1/templates")
 @RequiredArgsConstructor
+@Validated
 public class TemplateController {
     private final TemplateService templateService ;
 
     @PostMapping
-    public ResponseEntity<BaseResponse<TemplateResponse>> create(@RequestBody TemplateCreateRequest request) {
+    public ResponseEntity<BaseResponse<TemplateResponse>> create(@RequestBody @Valid TemplateCreateRequest request) {
         TemplateResponse response = templateService.create(request) ;
         return ResponseEntity.ok(BaseResponse.ofSuccess(response,"Create template success")) ;
     }
@@ -33,7 +36,7 @@ public class TemplateController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<BaseResponse<String>> update(@PathVariable String id,@RequestBody TemplateUpdateRequest request) {
+    public ResponseEntity<BaseResponse<String>> update(@PathVariable String id,@RequestBody @Valid TemplateUpdateRequest request) {
         templateService.update(id,request) ;
         return ResponseEntity.ok(BaseResponse.ofSuccess("Update template success")) ;
     }

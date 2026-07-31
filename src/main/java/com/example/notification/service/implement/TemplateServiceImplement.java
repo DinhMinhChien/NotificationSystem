@@ -16,32 +16,27 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class TemplateServiceImplement implements TemplateService {
-    private final TemplateRepository templateRepository ;
-    private final TemplateMapper templateMapper ;
+
+    private final TemplateRepository templateRepository;
+    private final TemplateMapper templateMapper;
 
     @Override
     public TemplateResponse create(TemplateCreateRequest request) {
-
-        String code = request.getCode() ;
-        ChannelType channel = request.getChannel() ;
-        String language = request.getLanguage() ;
-
         if (request.getNotificationType() == null) {
             throw new BusinessException("Notification type is required");
         }
 
-        if (templateRepository.existsByCodeAndChannelAndLanguageAndDeletedFalse(code,channel,language)) {
-            throw new BusinessException("Template is exist") ;
+        if (templateRepository.existsByCodeAndChannelAndLanguageAndDeletedFalse(
+                request.getCode(), request.getChannel(), request.getLanguage())) {
+            throw new BusinessException("Template already exists");
         }
 
-        Template template = new Template() ;
-
+        Template template = new Template();
         template.setCode(request.getCode());
         template.setChannel(request.getChannel());
         template.setNotificationType(request.getNotificationType());
@@ -50,40 +45,44 @@ public class TemplateServiceImplement implements TemplateService {
         template.setContent(request.getContent());
         template.setIsActive(request.getIsActive());
 
-        Template templateSave = templateRepository.save(template) ;
-
-        return templateMapper.toResponse(templateSave);
-
+        return templateMapper.toResponse(templateRepository.save(template));
     }
 
     @Override
     public List<TemplateResponse> getAll(String keyword, ChannelType channel, String language) {
         Specification<Template> specification = Specification.unrestricted();
-        specification = specification.and(TemplateSpecification.notDeleted()) ;
-        if (keyword != null) {
-            specification = specification.and(TemplateSpecification.likeKeyword(keyword)) ;
+        specification = specification.and(TemplateSpecification.notDeleted());
+
+        if (keyword != null && !keyword.isBlank()) {
+            specification = specification.and(TemplateSpecification.likeKeyword(keyword));
         }
         if (channel != null) {
-            specification = specification.and(TemplateSpecification.likeChannel(channel)) ;
+            specification = specification.and(TemplateSpecification.equalChannel(channel));
         }
-        if (language != null) {
-            specification = specification.and(TemplateSpecification.likeLanguage(language)) ;
+        if (language != null && !language.isBlank()) {
+            specification = specification.and(TemplateSpecification.equalLanguage(language));
         }
-        List<Template> templates = templateRepository.findAll(specification) ;
-        List<TemplateResponse> responses = templateMapper.toResponse(templates) ;
-        return responses ;
 
+        return templateMapper.toResponse(templateRepository.findAll(specification));
     }
 
     @Override
     public void update(String id, TemplateUpdateRequest request) {
-        Optional<Template> existTemplate = templateRepository.findById(id) ;
+        Template template = templateRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Not exist template"));
 
-        if (existTemplate.isEmpty()) {
-            throw new BusinessException("Not exist template !") ;
+        // ✅ Check trùng lặp với các template khác khi sửa thông tin
+        boolean exists = templateRepository.existsByCodeAndChannelAndLanguageAndDeletedFalse(
+                request.getCode(), request.getChannel(), request.getLanguage());
+
+        boolean isSelf = template.getCode().equals(request.getCode()) &&
+                template.getChannel() == request.getChannel() &&
+                template.getLanguage().equals(request.getLanguage());
+
+        if (exists && !isSelf) {
+            throw new BusinessException("Another template with same code, channel, and language already exists");
         }
 
-        Template template = existTemplate.get() ;
         template.setCode(request.getCode());
         template.setChannel(request.getChannel());
         template.setNotificationType(request.getNotificationType());
@@ -92,18 +91,15 @@ public class TemplateServiceImplement implements TemplateService {
         template.setContent(request.getContent());
         template.setIsActive(request.getIsActive());
 
-        templateRepository.save(template) ;
+        templateRepository.save(template);
     }
 
     @Override
     public void delete(String id) {
-        Optional<Template> existTemplate = templateRepository.findById(id) ;
+        Template template = templateRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Not exist template"));
 
-        if (existTemplate.isEmpty()) {
-            throw new BusinessException("Not exist template") ;
-        }
-
-        existTemplate.get().setDeleted(true);
-        templateRepository.save(existTemplate.get()) ;
+        template.setDeleted(true);
+        templateRepository.save(template);
     }
 }

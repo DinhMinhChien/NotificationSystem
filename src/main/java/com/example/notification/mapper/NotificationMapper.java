@@ -9,6 +9,8 @@ import java.util.List;
 
 @Mapper(componentModel = "spring")
 public interface NotificationMapper {
+    @Mapping(target = "fullName",source = "user.fullName")
+    NotificationResponse toResponse(Notification notification) ;
 
     @Mapping(target = "fullName",source = "user.fullName")
     List<NotificationResponse> toResponse(List<Notification> notification) ;

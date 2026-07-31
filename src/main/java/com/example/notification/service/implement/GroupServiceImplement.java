@@ -16,71 +16,76 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class GroupServiceImplement implements GroupService {
 
-    private final GroupRepository groupRepository ;
-    private final GroupMapper groupMapper ;
-    private final UserRepository userRepository ;
-    private final GroupMemberRepository groupMemberRepository ;
+    private final GroupRepository groupRepository;
+    private final GroupMapper groupMapper;
+    private final UserRepository userRepository;
+    private final GroupMemberRepository groupMemberRepository;
 
     @Override
     public GroupResponse create(GroupCreateRequest request) {
-        Group group = new Group() ;
-
+        Group group = new Group();
         group.setName(request.getName());
         group.setDescription(request.getDescription());
-        Group groupSave = groupRepository.save(group) ;
-        return groupMapper.toResponse(groupSave) ;
+        return groupMapper.toResponse(groupRepository.save(group));
     }
 
     @Override
     public List<GroupResponse> getAll() {
-        List<Group> groups = groupRepository.findAll() ;
-        return groupMapper.toResponse(groups) ;
+        return groupMapper.toResponse(groupRepository.findAll());
     }
 
     @Override
     public void insertMember(String id, InsertMemberRequest request) {
-        Optional<Group> existGroup = groupRepository.findById(id) ;
+        Group group = groupRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Group not exist"));
 
-        if (existGroup.isEmpty()) {
-            throw new BusinessException("Group not exist") ;
+        List<String> userIds = request.getUserIds();
+        if (userIds == null || userIds.isEmpty()) {
+            return;
         }
 
-        List<String> userIds = request.getUserIds() ;
-        List<GroupMember> groupMembers = new ArrayList<>() ;
-        for (String userId : userIds) {
-            Optional<User> userOptional = userRepository.findById(userId) ;
-            if (userOptional.isEmpty()) {
-                throw new BusinessException("Not exist user") ;
-            }
-            GroupMember groupMember = new GroupMember() ;
-            groupMember.setGroup(existGroup.get());
-            groupMember.setUser(userOptional.get());
-            groupMembers.add(groupMember) ;
+        // ✅ 1 Query duy nhất bằng IN(...) để giải quyết lỗi N+1
+        List<User> users = userRepository.findAllById(userIds);
+        if (users.size() != userIds.size()) {
+            throw new BusinessException("One or more userIds do not exist");
         }
 
-        groupMemberRepository.saveAll(groupMembers) ;
+        // Lấy danh sách member hiện tại để tránh lưu trùng
+        Set<String> existingUserIds = groupMemberRepository.findAllByGroup(group).stream()
+                .map(gm -> gm.getUser().getId())
+                .collect(Collectors.toSet());
+
+        List<GroupMember> newMembers = users.stream()
+                .filter(u -> !existingUserIds.contains(u.getId()))
+                .map(user -> {
+                    GroupMember member = new GroupMember();
+                    member.setGroup(group);
+                    member.setUser(user);
+                    return member;
+                })
+                .toList();
+
+        if (!newMembers.isEmpty()) {
+            groupMemberRepository.saveAll(newMembers);
+        }
     }
 
     @Override
     public List<User> getMember(String id) {
-        Optional<Group> groupOptional = groupRepository.findById(id) ;
-        if (groupOptional.isEmpty()) {
-            throw new BusinessException("Not exist group");
-        }
+        Group group = groupRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Not exist group"));
 
-        Group group = groupOptional.get() ;
-        List<GroupMember> groupMembers = groupMemberRepository.findAllByGroup(group) ;
-        List<User> users = groupMembers.stream().map(GroupMember::getUser).toList() ;
-
-        return users ;
+        return groupMemberRepository.findAllByGroup(group).stream()
+                .map(GroupMember::getUser)
+                .toList();
     }
 }
